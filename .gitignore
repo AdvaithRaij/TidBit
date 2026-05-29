@@ -1,0 +1,53 @@
+# Swift Build
+.build/
+.swiftpm/
+*.xcodeproj
+xcuserdata/
+DerivedData/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Build artifacts - don't commit built app or DMG
+Dist/
+
+# Icon generation - keep .icns, ignore temporary files
+AppBundle/Tidbit.iconset/
+generate_icon.py
+__pycache__/
+*.pyc
+
+# User data (don't commit personal todos)
+Library/Application Support/Tidbit/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build scripts that were manually edited (keep originals in commits)
+# build_release.sh
+# create_dmg.sh
+# bundle_app.sh
