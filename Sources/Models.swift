@@ -14,18 +14,21 @@ struct ClipboardItem: Codable, Identifiable, Equatable {
     var title: String
     var body: String
     var createdAt: Date
+    var sourceKey: String = ""
 
     init(
         id: UUID = UUID(),
         kind: TodoKind,
         title: String,
         body: String = "",
+        sourceKey: String = "",
         createdAt: Date = .now
     ) {
         self.id = id
         self.kind = kind
         self.title = title
         self.body = body
+        self.sourceKey = sourceKey
         self.createdAt = createdAt
     }
 }

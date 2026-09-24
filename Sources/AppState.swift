@@ -138,7 +138,13 @@ final class AppState: ObservableObject {
         guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
         var updated = items[index]
         updated.isChecked.toggle()
-        items[index] = updated
+        items.remove(at: index)
+        if updated.isChecked {
+            items.append(updated)
+        } else {
+            let firstDoneIndex = items.firstIndex(where: { $0.isChecked }) ?? items.endIndex
+            items.insert(updated, at: firstDoneIndex)
+        }
         objectWillChange.send()
         persist()
     }
@@ -162,15 +168,14 @@ final class AppState: ObservableObject {
         persist()
     }
 
-    func moveUp(item: TodoItem) {
-        guard let index = items.firstIndex(where: { $0.id == item.id }), index > 0 else { return }
-        items.swapAt(index, index - 1)
-        persist()
-    }
-
-    func moveDown(item: TodoItem) {
-        guard let index = items.firstIndex(where: { $0.id == item.id }), index < items.count - 1 else { return }
-        items.swapAt(index, index + 1)
+    func applyOrder(_ orderedVisible: [TodoItem]) {
+        let visibleIds = Set(orderedVisible.map { $0.id })
+        let positions = items.indices.filter { visibleIds.contains(items[$0].id) }
+        var newItems = items
+        for (pos, item) in zip(positions, orderedVisible) {
+            newItems[pos] = item
+        }
+        items = newItems
         persist()
     }
 
@@ -197,11 +202,30 @@ final class AppState: ObservableObject {
         let content = PasteboardHelper.extractContent(from: pasteboard)
         switch content {
         case .imageURL(let url):
+            let sourceKey = url.absoluteString
+            if let idx = clipboardItems.firstIndex(where: { $0.kind == .image && $0.sourceKey == sourceKey }) {
+                if idx != 0 {
+                    let existing = clipboardItems.remove(at: idx)
+                    clipboardItems.insert(existing, at: 0)
+                    persist()
+                }
+                return
+            }
             guard let copiedURL = persistence.copyImageToLibrary(from: url) else { return }
-            storeClipboardItem(ClipboardItem(kind: .image, title: copiedURL.lastPathComponent, body: copiedURL.path))
+            storeClipboardItem(ClipboardItem(kind: .image, title: copiedURL.lastPathComponent, body: copiedURL.path, sourceKey: sourceKey))
         case .imageData(let data):
+            let roughHash = data.prefix(256).reduce(0 as UInt64) { $0 ^ UInt64($1) }
+            let sourceKey = "data_\(data.count)_\(roughHash)"
+            if let idx = clipboardItems.firstIndex(where: { $0.kind == .image && $0.sourceKey == sourceKey }) {
+                if idx != 0 {
+                    let existing = clipboardItems.remove(at: idx)
+                    clipboardItems.insert(existing, at: 0)
+                    persist()
+                }
+                return
+            }
             guard let url = persistence.writePastedImage(data: data) else { return }
-            storeClipboardItem(ClipboardItem(kind: .image, title: url.lastPathComponent, body: url.path))
+            storeClipboardItem(ClipboardItem(kind: .image, title: url.lastPathComponent, body: url.path, sourceKey: sourceKey))
         case .url(let urlString):
             let title = URL(string: urlString)?.host ?? urlString
             storeClipboardItem(ClipboardItem(kind: .url, title: title, body: urlString))

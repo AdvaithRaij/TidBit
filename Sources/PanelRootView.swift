@@ -85,6 +85,7 @@ struct PanelRootView: View {
     @State private var isHoveringDropZone = false
     @State private var clipboardSearchText = ""
     @State private var composerHeight: CGFloat = 48
+    @State private var draggingItemId: UUID? = nil
 
     private var theme: TidbitTheme {
         TidbitTheme(theme: appState.theme, colorScheme: colorScheme)
@@ -162,6 +163,15 @@ struct PanelRootView: View {
             VStack(spacing: 0) {
                 header
                 composer
+                    .overlay(
+                        Group {
+                            if draggingItemId != nil {
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .onDrop(of: [UTType.item], isTargeted: nil) { _ in true }
+                            }
+                        }
+                    )
                 sectionBar
                 content
                 footer
@@ -232,7 +242,7 @@ struct PanelRootView: View {
                 HStack(spacing: 8) {
                     ZStack(alignment: .topLeading) {
                         if draftText.isEmpty {
-                            Text("Add a todo or note. Press Enter to save.")
+                            Text("Enter to save, ⇧ + Enter -> new line")
                                 .font(.system(size: 13, weight: .medium, design: .rounded))
                                 .foregroundStyle(theme.muted)
                                 .padding(.horizontal, 12)
@@ -250,6 +260,14 @@ struct PanelRootView: View {
                             .padding(.trailing, 32)
                             .onChange(of: draftText) {
                                 updateComposerHeight()
+                            }
+                            .onKeyPress(.return) {
+                                let shiftDown = NSApp.currentEvent?.modifierFlags.contains(.shift) ?? false
+                                if shiftDown {
+                                    return .ignored
+                                }
+                                submitDraft()
+                                return .handled
                             }
 
                         VStack {
@@ -427,18 +445,22 @@ struct PanelRootView: View {
                     if filteredTodos.isEmpty {
                         EmptyStateCard(title: "No matching todos", message: "Add one with Enter or attach an image.", theme: theme)
                     } else {
-                        ForEach(Array(filteredTodos.enumerated()), id: \.element.id) { index, item in
+                        ForEach(filteredTodos) { item in
                             TodoRow(
                                 item: item,
+                                isDragging: draggingItemId == item.id,
                                 onSaveEdit: { text in appState.updateTodo(item, text: text) },
                                 onToggle: { appState.toggleCheck(for: item) },
                                 onDelete: { appState.delete(item: item) },
-                                onMoveUp: { appState.moveUp(item: item) },
-                                onMoveDown: { appState.moveDown(item: item) },
-                                canMoveUp: index > 0,
-                                canMoveDown: index < filteredTodos.count - 1,
+                                onDragStarted: { draggingItemId = item.id },
                                 theme: theme
                             )
+                            .onDrop(of: [UTType.text], delegate: TodoDropDelegate(
+                                targetItem: item,
+                                draggingItemId: $draggingItemId,
+                                appState: appState,
+                                filteredTodos: filteredTodos
+                            ))
                         }
                     }
                 }
@@ -638,13 +660,11 @@ private struct HeaderControl: View {
 
 private struct TodoRow: View {
     let item: TodoItem
+    let isDragging: Bool
     let onSaveEdit: (String) -> Void
     let onToggle: () -> Void
     let onDelete: () -> Void
-    let onMoveUp: () -> Void
-    let onMoveDown: () -> Void
-    let canMoveUp: Bool
-    let canMoveDown: Bool
+    let onDragStarted: () -> Void
     let theme: TidbitTheme
 
     @State private var isEditing = false
@@ -820,31 +840,22 @@ private struct TodoRow: View {
                         .buttonStyle(.plain)
                         .cursor(.pointingHand)
 
-                        VStack(spacing: 4) {
-                            Button(action: onMoveUp) {
-                                Image(systemName: "chevron.up")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundStyle(canMoveUp ? theme.muted : theme.muted.opacity(0.3))
+                        Image(systemName: "line.3.horizontal")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(theme.muted.opacity(isHovering ? 0.55 : 0.2))
+                            .padding(.vertical, 4)
+                            .onDrag {
+                                onDragStarted()
+                                return NSItemProvider(object: item.id.uuidString as NSString)
                             }
-                            .buttonStyle(.plain)
-                            .cursor(.pointingHand)
-                            .disabled(!canMoveUp)
-
-                            Button(action: onMoveDown) {
-                                Image(systemName: "chevron.down")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundStyle(canMoveDown ? theme.muted : theme.muted.opacity(0.3))
-                            }
-                            .buttonStyle(.plain)
-                            .cursor(.pointingHand)
-                            .disabled(!canMoveDown)
-                        }
+                            .cursor(.openHand)
                     }
                 }
             }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
+        .opacity(isDragging ? 0.4 : 1)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(isHovering ? theme.glass.opacity(0.35) : theme.glass.opacity(0.15))
@@ -862,6 +873,35 @@ private struct TodoRow: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return "Added " + formatter.localizedString(for: date, relativeTo: .now)
+    }
+}
+
+private struct TodoDropDelegate: DropDelegate {
+    let targetItem: TodoItem
+    @Binding var draggingItemId: UUID?
+    let appState: AppState
+    let filteredTodos: [TodoItem]
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func dropEntered(info: DropInfo) {
+        guard let sourceId = draggingItemId,
+              sourceId != targetItem.id,
+              let srcIdx = filteredTodos.firstIndex(where: { $0.id == sourceId }),
+              let tgtIdx = filteredTodos.firstIndex(where: { $0.id == targetItem.id })
+        else { return }
+
+        var reordered = filteredTodos
+        reordered.move(fromOffsets: IndexSet(integer: srcIdx),
+                       toOffset: tgtIdx > srcIdx ? tgtIdx + 1 : tgtIdx)
+        appState.applyOrder(reordered)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggingItemId = nil
+        return true
     }
 }
 
